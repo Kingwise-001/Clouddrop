@@ -2,22 +2,23 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const AWS = require("aws-sdk");
-const { Pool } = require("pg");
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors({
-  origin: "http://localhost:3000"
-}));
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+  })
+);
 app.use(express.json());
 
 // Multer setup (memory storage for S3 upload)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 });
 
 // AWS S3 setup
@@ -28,19 +29,13 @@ const s3 = new AWS.S3({
 });
 
 // PostgreSQL (RDS) setup
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: 5432,
-});
+// PostgreSQL (RDS) setup
+const { pool, initDatabase } = require("./db");
 
 // Health check
 app.get("/", (req, res) => {
   res.send("CloudDrop Backend is running 🚀");
 });
-
 
 // ===============================
 // 📤 UPLOAD SINGLE FILE
@@ -70,13 +65,11 @@ app.post("/api/uploads/single", upload.single("file"), async (req, res) => {
       message: "File uploaded successfully",
       file: dbResult.rows[0],
     });
-
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Upload failed" });
   }
 });
-
 
 // ===============================
 // 📤 UPLOAD BULK FILES
@@ -112,13 +105,11 @@ app.post("/api/uploads/bulk", upload.array("files"), async (req, res) => {
       message: "Bulk upload successful",
       files: uploadedFiles,
     });
-
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Bulk upload failed" });
   }
 });
-
 
 // ===============================
 // 📁 GET ALL FILES
@@ -136,7 +127,6 @@ app.get("/api/files", async (req, res) => {
   }
 });
 
-
 // ===============================
 // 📄 GET SINGLE FILE
 // ===============================
@@ -144,23 +134,18 @@ app.get("/api/files/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await pool.query(
-      "SELECT * FROM files WHERE id = $1",
-      [id]
-    );
+    const result = await pool.query("SELECT * FROM files WHERE id = $1", [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "File not found" });
     }
 
     res.json(result.rows[0]);
-
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Error fetching file" });
   }
 });
-
 
 // ===============================
 // 📥 DOWNLOAD FILE
@@ -169,23 +154,20 @@ app.get("/api/files/:id/download", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await pool.query(
-      "SELECT url FROM files WHERE id = $1",
-      [id]
-    );
+    const result = await pool.query("SELECT url FROM files WHERE id = $1", [
+      id,
+    ]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "File not found" });
     }
 
     res.json({ downloadUrl: result.rows[0].url });
-
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Download failed" });
   }
 });
-
 
 // ===============================
 // 🗑️ DELETE FILE
@@ -197,13 +179,11 @@ app.delete("/api/files/:id", async (req, res) => {
     await pool.query("DELETE FROM files WHERE id = $1", [id]);
 
     res.json({ message: "File deleted successfully" });
-
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Delete failed" });
   }
 });
-
 
 // ===============================
 // 📊 STATS
@@ -215,15 +195,21 @@ app.get("/api/files/stats/summary", async (req, res) => {
     res.json({
       totalFiles: total.rows[0].count,
     });
-
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Stats error" });
   }
 });
 
-
 // Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Start server + initialize DB
+initDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to start server:", err.message);
+    process.exit(1);
+  });
